@@ -23,6 +23,9 @@ SetupMutex={#SetupLock}
 DefaultDirName={localappdata}\Programs\DukhiDukhiManager
 DefaultGroupName=Духи Духи менеджер
 DisableProgramGroupPage=yes
+#ifdef TestInstall
+Uninstallable=no
+#endif
 UninstallDisplayIcon={app}\dist\AnimeSSS.Local.exe
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
@@ -46,6 +49,7 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 
 [Files]
 Source: "dist\AnimeSSS.Local.next.exe"; DestDir: "{app}\dist"; DestName: "AnimeSSS.Local.exe"; Flags: ignoreversion
+Source: "inspector-extension\*"; DestDir: "{app}\dist\extensions\dukhi-inspector"; Flags: ignoreversion
 #ifndef ManagerOnly
 Source: "dist\Microsoft.Web.WebView2.Core.dll"; DestDir: "{app}\dist"; Flags: ignoreversion
 Source: "dist\Microsoft.Web.WebView2.WinForms.dll"; DestDir: "{app}\dist"; Flags: ignoreversion

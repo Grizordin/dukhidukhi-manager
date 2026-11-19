@@ -12,6 +12,7 @@ using Microsoft.Web.WebView2.WinForms;
 
 public partial class ExtensionManager : Form {
     const string ExtensionId = "bnimknkampfeeemccidiigealnpoheap";
+    const string InspectorId = "mdjemcolglkldcmaocemjmbbkgmfpkil";
     const string BundledTampermonkey = "tampermonkey-legacy-quick-controls-updates";
     readonly WebView2 web = new WebView2();
     readonly Label status = new Label();
@@ -152,6 +153,11 @@ public partial class ExtensionManager : Form {
             }
             await RefreshExtensionList();
             await RefreshClientVersion(prepareMissingCopy: true);
+            try {
+                await AttachInspector();
+            } catch (Exception error) {
+                status.Text = "Инспектор страницы: " + error.Message;
+            }
             managerHome.Enabled = true;
             await StartManagerUpdateChecks();
         }catch(Exception e){status.Text=e.Message;if(args.Length>0){File.WriteAllText(Path.Combine(root,"probe-result.json"),new JavaScriptSerializer().Serialize(new {error=e.ToString()}));Close();}else MessageBox.Show(this,e.Message,"Ошибка WebView2");}
@@ -208,6 +214,15 @@ public partial class ExtensionManager : Form {
         if (extension.Id != ExtensionId) throw new IOException("Идентификатор Tampermonkey при переносе не совпал.");
         if (extension.IsEnabled != wasEnabled) await extension.EnableAsync(wasEnabled);
         File.WriteAllText(receipt, BundledTampermonkey);
+    }
+
+    async Task AttachInspector() {
+        string folder = Path.Combine(root, "extensions", "dukhi-inspector");
+        if (!File.Exists(Path.Combine(folder, "manifest.json"))) return;
+        var registered = await web.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+        if (registered.Any(extension => extension.Id == InspectorId)) return;
+        var inspector = await web.CoreWebView2.Profile.AddBrowserExtensionAsync(folder);
+        if (inspector.Id != InspectorId) throw new IOException("Идентификатор инспектора не совпал.");
     }
 
     string TampermonkeyFolder() {

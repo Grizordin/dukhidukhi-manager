@@ -230,7 +230,7 @@ public partial class ExtensionManager {
 
     void AddShortcuts(TableLayoutPanel cards) {
         var hints = new RoundedPanel {
-            Dock = DockStyle.Fill, Margin = new Padding(0), Height = 105, Radius = 14,
+            Dock = DockStyle.Fill, Margin = new Padding(0), Height = 128, Radius = 14,
             Surface = Color.FromArgb(27, 23, 33), End = Color.FromArgb(27, 23, 33), Border = Line,
         };
         hints.Controls.Add(Headline("Горячие клавиши", 18, 10, 11F, Ink));
@@ -238,6 +238,8 @@ public partial class ExtensionManager {
         hints.Controls.Add(Headline("Переключить скрипты и обновить вкладку", 141, 40, 9F, Muted));
         hints.Controls.Add(Headline("Ctrl + Shift + U", 18, 66, 9F, Gold));
         hints.Controls.Add(Headline("Закрыть AnimeSSS и вернуться в менеджер", 141, 66, 9F, Muted));
+        hints.Controls.Add(Headline("F12", 18, 92, 9F, Gold));
+        hints.Controls.Add(Headline("Открыть или закрыть инспектор страницы", 141, 92, 9F, Muted));
         cards.Controls.Add(hints);
     }
 
