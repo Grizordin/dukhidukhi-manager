@@ -1,111 +1,155 @@
 (() => {
   'use strict';
 
-  // The native weather surface is drawn above the page. Its existing drawer
-  // cutout can also reserve room for the floating controls.
-  const bridge = window.chrome?.webview;
-  if (typeof bridge?.postMessage !== 'function') return;
-  const send = bridge.postMessage;
-  const prefix = 'animesss:weather-layout/';
   const floating = [
-    '.suite-floating-ui', '#suite-settings-btn', '#suite-settings-panel', '#suite-mobile-helper-layer',
-    '.clicker-ui-root', '.clicker-btn-root', '.clicker-modal', '.clicker-ui-root #settingsPanel', '#dukhi-inspector',
+    '.suite-floating-ui:not(.aw-modal-overlay, :has(> .suite-lab-fatigue-modal-box))',
+    '.aw-modal-overlay > .aw-modal-box', '.suite-floating-ui > .suite-lab-fatigue-modal-box',
+    '#suite-settings-btn', '#suite-settings-panel', '#suite-mobile-helper-layer',
+    '.clicker-ui-root', '.clicker-btn-root', '.clicker-modal', '.clicker-ui-root #settingsPanel',
+    '.cpt-toast', '#customNotifyRoot .custom-toast', '#dukhi-inspector',
   ].join(',');
-  let previousLayout, lastSent, frame, watching;
+  const tracked = new Set();
+  const resize = new ResizeObserver(schedule);
+  const port = chrome.runtime.connect({ name: 'weather-site' });
+  let frame = 0;
+  let lastSent;
+  let gesture;
+  let needsTracking = true;
 
-  function rectOf(element) {
+  function bounds(element) {
     if (element.closest('[hidden], [aria-hidden="true"]')) return null;
-    if (element.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) === false) return null;
+    if (element.checkVisibility({ visibilityProperty: true, opacityProperty: true }) === false) return null;
     const box = element.getBoundingClientRect();
-    return box.width > 0 && box.height > 0 ? box : null;
+    const left = Math.max(0, box.left / innerWidth);
+    const right = Math.min(1, box.right / innerWidth);
+    const top = Math.max(0, box.top / innerHeight);
+    const bottom = Math.min(1, box.bottom / innerHeight);
+    const rect = [left, top, right, bottom].map(value => Math.round(value * 1e6) / 1e6);
+    return rect[0] < rect[2] && rect[1] < rect[3] ? rect : null;
   }
 
-  function adjustedMessage(message, layout) {
-    const bounds = Array.isArray(layout) ? layout : layout.area;
-    if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite) || !innerWidth || !innerHeight)
-      return message;
-    const [mainLeft, mainRight, pageWidth] = bounds;
-    const existing = Array.isArray(layout.drawer) && layout.drawer.length === 4 && layout.drawer.every(Number.isFinite)
-      ? layout.drawer : null;
-    let mask = existing;
-    for (const element of document.querySelectorAll(floating)) {
-      const box = rectOf(element);
-      if (!box) continue;
-      const left = Math.max(0, box.left / innerWidth);
-      const right = Math.min(pageWidth, box.right / innerWidth);
-      const top = Math.max(0, box.top / innerHeight);
-      const bottom = Math.min(1, box.bottom / innerHeight);
-      if (left >= right || top >= bottom || (left >= mainLeft && right <= mainRight)) continue;
-      mask = mask ? [Math.min(mask[0], left), Math.min(mask[1], top), Math.max(mask[2], right), Math.max(mask[3], bottom)]
-        : [left, top, right, bottom];
+  function publish(value) {
+    const key = JSON.stringify(value);
+    if (key === lastSent) return;
+    try {
+      port.postMessage(value);
+      lastSent = key;
+    } catch {
+      stop();
     }
-    if (!mask || mask === existing) return message;
-    return prefix + JSON.stringify({ ...(Array.isArray(layout) ? {} : layout), area: bounds, drawer: mask });
-  }
-
-  function update() {
-    frame = 0;
-    if (!previousLayout || document.hidden) return;
-    const next = adjustedMessage(previousLayout.message, previousLayout.layout);
-    if (next === lastSent) return;
-    Reflect.apply(send, bridge, [next]);
-    lastSent = next;
   }
 
   function schedule() {
-    if (!frame && previousLayout) frame = requestAnimationFrame(update);
+    if (!gesture && !frame) frame = requestAnimationFrame(measure);
   }
 
-  function capture(message, ...rest) {
-    if (typeof message === 'string' && message.startsWith(prefix)) {
-      let layout;
-      try { layout = JSON.parse(message.slice(prefix.length)); } catch { /* Pass through unknown formats. */ }
-      previousLayout = layout && typeof layout === 'object' ? { message, layout } : null;
-      if (previousLayout && !document.hidden) {
-        message = adjustedMessage(message, layout);
-        if (!watching) watchFloatingControls();
-      }
-      lastSent = message;
+  function measure() {
+    frame = 0;
+    if (document.hidden) {
+      publish(null);
+      return;
     }
-    return Reflect.apply(send, this, [message, ...rest]);
+    if (needsTracking) {
+      track();
+      needsTracking = false;
+    }
+    const rectangles = innerWidth && innerHeight ? Array.from(tracked, bounds).filter(Boolean) : [];
+    publish(rectangles.slice(0, 128));
   }
 
-  try {
-    bridge.postMessage = capture;
-    if (bridge.postMessage !== capture) return;
-  } catch { return; }
+  function track() {
+    const current = new Set(document.querySelectorAll(floating));
+    for (const element of tracked) {
+      if (current.has(element)) continue;
+      resize.unobserve(element);
+      tracked.delete(element);
+    }
+    for (const element of current) {
+      if (tracked.has(element)) continue;
+      resize.observe(element);
+      tracked.add(element);
+    }
+  }
 
-  function watchFloatingControls() {
-    watching = true;
-    const resize = new ResizeObserver(schedule);
-    const tracked = new Set();
-    function track() {
-      const current = new Set(document.querySelectorAll(floating));
-      for (const element of tracked) {
-        if (!current.has(element)) {
-          resize.unobserve(element);
-          tracked.delete(element);
-        }
-      }
-      for (const element of current) {
-        if (tracked.has(element)) continue;
-        resize.observe(element);
-        tracked.add(element);
-      }
+  function containsControl(node) {
+    return node instanceof Element && (node.matches(floating) || !!node.querySelector(floating));
+  }
+
+  const mutations = new MutationObserver(records => {
+    if (records.some(record => record.type === 'attributes' ? tracked.has(record.target) || containsControl(record.target) :
+      Array.from(record.addedNodes).some(containsControl) || Array.from(record.removedNodes).some(containsControl))) {
+      needsTracking = true;
       schedule();
     }
+  });
 
-    function isFloating(node) {
-      return node instanceof Element && (node.matches(floating) || !!node.querySelector(floating));
-    }
-    new MutationObserver(records => {
-      if (records.some(record => record.type === 'attributes' ? tracked.has(record.target) || isFloating(record.target) :
-        Array.from(record.addedNodes).some(isFloating) || Array.from(record.removedNodes).some(isFloating))) track();
-    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'id', 'hidden', 'style', 'aria-hidden'] });
-    track();
-    window.addEventListener('resize', schedule, { passive: true });
-    window.addEventListener('scroll', schedule, { passive: true, capture: true });
-    document.addEventListener('visibilitychange', schedule);
-    document.addEventListener('transitionend', schedule, true);
+  function observeControls() {
+    mutations.observe(document, { subtree: true, childList: true, attributes: true,
+      attributeFilter: ['class', 'id', 'hidden', 'style', 'aria-hidden'] });
   }
+
+  function beginGesture(event) {
+    if (gesture || !event.isPrimary || event.button !== 0 ||
+        !event.composedPath().some(node => tracked.has(node))) return;
+    gesture = { id: event.pointerId, mouse: event.pointerType === 'mouse' };
+    // Keep the current cutouts while the pointer is held so dragging never
+    // rebuilds the mask in the separate weather WebView.
+    mutations.disconnect();
+    cancelAnimationFrame(frame);
+    frame = 0;
+  }
+
+  function finishGesture() {
+    if (!gesture) return;
+    gesture = null;
+    needsTracking = true;
+    observeControls();
+    schedule();
+  }
+
+  function hide() {
+    finishGesture();
+    publish(null);
+  }
+
+  const lifecycle = new AbortController();
+  const { signal } = lifecycle;
+  function stop() {
+    lifecycle.abort();
+    mutations.disconnect();
+    resize.disconnect();
+    cancelAnimationFrame(frame);
+  }
+
+  port.onDisconnect.addListener(stop);
+  observeControls();
+  const pointer = { capture: true, passive: true, signal };
+  window.addEventListener('pointerdown', beginGesture, pointer);
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    window.addEventListener(type, event => {
+      if (gesture?.id === event.pointerId) finishGesture();
+    }, pointer);
+  }
+  // Legacy mouse drags can finish on mouseup or release outside the WebView.
+  window.addEventListener('mouseup', event => {
+    if (gesture?.mouse && event.button === 0) finishGesture();
+  }, pointer);
+  window.addEventListener('pointermove', event => {
+    if (gesture?.id === event.pointerId && gesture.mouse && !(event.buttons & 1)) finishGesture();
+  }, pointer);
+  window.addEventListener('blur', finishGesture, { signal });
+  window.addEventListener('resize', schedule, { passive: true, signal });
+  window.addEventListener('scroll', schedule, { capture: true, passive: true, signal });
+  window.addEventListener('pagehide', hide, { signal });
+  window.addEventListener('pageshow', schedule, { signal });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hide();
+    else schedule();
+  }, { signal });
+  for (const event of ['animationstart', 'animationend', 'animationcancel', 'transitionrun', 'transitionend', 'transitioncancel']) {
+    document.addEventListener(event, ({ target }) => {
+      if (tracked.has(target)) schedule();
+    }, { capture: true, signal });
+  }
+  schedule();
 })();

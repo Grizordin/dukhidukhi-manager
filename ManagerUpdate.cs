@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
 static class ManagerUpdate {
-    public const string VersionText = "0.7.33";
+    public const string VersionText = "0.7.34";
     public const string Repository = "Grizordin/dukhidukhi-manager";
     public const string InstallerName = "DukhiDukhi-Manager-Setup.exe";
     public const string SetupMutex = @"Local\AnimeSSS.DukhiDukhi.Setup";

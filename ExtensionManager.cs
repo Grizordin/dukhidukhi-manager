@@ -21,10 +21,15 @@ public partial class ExtensionManager : Form {
     readonly string[] args;
     CoreWebView2Environment environment;
     string profile;
+    uint weatherBrowser;
     bool busy;
     bool checkingManagerUpdate;
     readonly List<WebView2> popups = new List<WebView2>();
     [STAThread] public static void Main(string[] args) {
+        if (args.Length > 0 && args[0] == WeatherMaskHost.Origin) {
+            WeatherMaskHost.Run();
+            return;
+        }
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         if(args.Length>=1&&args[0]=="--package-test") {PackageTest(args);return;}
         if (args.Length == 2 && args[0] == "--apply-client-update") {
@@ -247,13 +252,32 @@ public partial class ExtensionManager : Form {
         string folder = Path.Combine(root, "extensions", "dukhi-inspector");
         string manifest = Path.Combine(folder, "manifest.json");
         if (!File.Exists(manifest)) return;
-        string receipt = Path.Combine(root, "dukhi-inspector-attached.txt");
         string package = ExtensionPackages.Hash(File.ReadAllBytes(manifest));
-        var registered = await web.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+        await AttachInspectorToProfile(web.CoreWebView2.Profile, folder, package, Path.Combine(root, "dukhi-inspector-attached.txt"));
+        if (!File.Exists(Path.Combine(folder, "weather-mask.js"))) return;
+
+        WeatherMaskHost.Register(root, Application.ExecutablePath);
+        string receipt = Path.Combine(root, "dukhi-weather-attached.txt");
+        string weatherProfile = Path.GetDirectoryName(profile);
+        if (File.Exists(receipt) && File.ReadAllText(receipt) == package &&
+            Directory.Exists(Path.Combine(weatherProfile, "EBWebView", "Default"))) return;
+        // The atmosphere lives in the native shell's separate WebView2 profile.
+        var options = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
+        var weatherEnvironment = await CoreWebView2Environment.CreateAsync(null, weatherProfile, options);
+        var controller = await weatherEnvironment.CreateCoreWebView2ControllerAsync(Handle);
+        try {
+            controller.IsVisible = false;
+            weatherBrowser = controller.CoreWebView2.BrowserProcessId;
+            await AttachInspectorToProfile(controller.CoreWebView2.Profile, folder, package, receipt);
+        } finally { controller.Close(); }
+    }
+
+    static async Task AttachInspectorToProfile(CoreWebView2Profile profile, string folder, string package, string receipt) {
+        var registered = await profile.GetBrowserExtensionsAsync();
         var existing = registered.FirstOrDefault(extension => extension.Id == InspectorId);
         if (existing != null && File.Exists(receipt) && File.ReadAllText(receipt) == package) return;
         bool enabled = existing == null || existing.IsEnabled;
-        var inspector = await web.CoreWebView2.Profile.AddBrowserExtensionAsync(folder);
+        var inspector = await profile.AddBrowserExtensionAsync(folder);
         if (inspector.Id != InspectorId) throw new IOException("Идентификатор инспектора не совпал.");
         if (inspector.IsEnabled != enabled) await inspector.EnableAsync(enabled);
         File.WriteAllText(receipt, package);
@@ -424,6 +448,7 @@ public partial class ExtensionManager : Form {
         bool useProbeProfile = args.Length > 0 && args[0].StartsWith("--probe", StringComparison.Ordinal)
             && args[0] != "--probe-handoff-natural";
         string wait = Process.GetCurrentProcess().Id + "," + web.CoreWebView2.BrowserProcessId;
+        if (weatherBrowser != 0) wait += "," + weatherBrowser;
         string launchProfile = useProbeProfile ? profile : "-";
         string arguments = "--launch-wait " + wait + " \"" + exe + "\" \"" + launchProfile + "\"";
         Process.Start(new ProcessStartInfo(Application.ExecutablePath, arguments) { UseShellExecute = false });

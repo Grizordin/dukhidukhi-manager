@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Духи Духи — инспектор страницы",
-  "version": "1.2.1",
+  "version": "1.2.4",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvEBZZ/5F4uCJ9aUjFc8pHByFoi+4m1hQb/iBH7kYfBieNnauheW+4XI5WDVzxgO2PiaYusYJ/+TkFVxAFiA4ifbWmqWGVb7j1zo3ap8LKpBlWR6QBmjXsUZ4IKNgOrfI58Szll+Fe14WjqgoaXcNMnv4ErFgSbxlI6OPJ9AswgmrPNKnJNZFfWQPtKLuBk7rf2gY3GJNnB5q/DIN6U6rxHFMu622dQm1G86bYMkUBVS0exTZ/3sVywW1GyIR+zVhRQU67UNyMb6lRAErtlyikTPAM8G69GynxOy36pm+o3ER70SM7gaV6gPSld5wtzEEAQfvynFHsK3Zj7zzwa3LqQIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "background": { "service_worker": "weather-channel.js" },
   "content_scripts": [
     {
       "matches": ["https://animesss.tv/*", "https://animesss.com/*"],
@@ -12,9 +14,19 @@
     },
     {
       "matches": ["https://animesss.tv/*", "https://animesss.com/*"],
-      "js": ["weather-layout.js", "page-console.js"],
+      "js": ["page-console.js"],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": ["https://animesss.tv/*", "https://animesss.com/*", "https://www.animesss.tv/*", "https://www.animesss.com/*"],
+      "js": ["weather-layout.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["http://tauri.localhost/weather-gutters.html"],
+      "js": ["weather-mask.js"],
+      "run_at": "document_start"
     }
   ]
 }

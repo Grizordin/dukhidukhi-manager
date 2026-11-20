@@ -86,14 +86,17 @@ Filename: "{app}\dist\AnimeSSS.Local.exe"; Parameters: "--after-manager-update";
 Filename: "{app}\dist\manager-install.ini"; Section: "Manager"; Key: "Installed"; String: "1"; Flags: uninsdeletesection
 #endif
 
-#ifndef ManagerOnly
 #ifndef TestInstall
 [Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.dukhidukhi.weather"; ValueType: string; ValueData: "{app}\dist\weather-mask-host.json"; Flags: uninsdeletekey
+#ifndef ManagerOnly
 Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.dukhidukhi.clicker"; ValueType: string; ValueData: "{app}\dist\clicker-native-host.json"; Flags: uninsdeletekey
 #endif
 #endif
 
 [UninstallDelete]
+Type: files; Name: "{app}\dist\weather-mask-host.json"
+Type: files; Name: "{app}\dist\dukhi-weather-attached.txt"
 Type: files; Name: "{app}\dist\app\animesss-desktop.exe"
 Type: files; Name: "{app}\dist\app\app-icon.ico"
 Type: files; Name: "{app}\dist\app\VERSION_HISTORY.txt"
