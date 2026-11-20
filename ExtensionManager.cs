@@ -27,21 +27,27 @@ public partial class ExtensionManager : Form {
     [STAThread] public static void Main(string[] args) {
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         if(args.Length>=1&&args[0]=="--package-test") {PackageTest(args);return;}
+        if (args.Length == 2 && args[0] == "--apply-client-update") {
+            var updater = new ClientUpdate(AppDomain.CurrentDomain.BaseDirectory);
+            try {
+                updater.ApplyInstalledUpdate(args[1]);
+                StartClient(updater.LocalPath, "-");
+            } catch (Exception error) {
+                MessageBox.Show(error.Message, "Обновление AnimeSSS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            return;
+        }
         if(args.Length==4 && args[0]=="--launch-wait") {
             try {
                 foreach(string id in args[1].Split(',')) {
-                    try {var p=Process.GetProcessById(Int32.Parse(id));if(!p.WaitForExit(15000))throw new IOException("Профиль ещё занят. Закройте копию AnimeSSS через меню «Выйти» и повторите запуск.");}
+                    try {
+                        using (var p=Process.GetProcessById(Int32.Parse(id))) {
+                            if(!p.WaitForExit(15000))throw new IOException("Профиль ещё занят. Закройте копию AnimeSSS через меню «Выйти» и повторите запуск.");
+                        }
+                    }
                     catch(ArgumentException) {}
                 }
-                var start=new ProcessStartInfo(args[2],"--via-launcher") {WorkingDirectory=Path.GetDirectoryName(args[2]),UseShellExecute=false};
-                if(args[3]=="-")start.EnvironmentVariables.Remove("WEBVIEW2_USER_DATA_FOLDER");else start.EnvironmentVariables["WEBVIEW2_USER_DATA_FOLDER"]=args[3];
-                start.EnvironmentVariables.Remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
-                using (var client = Process.Start(start)) {
-                    if (client == null) throw new IOException("Windows не запустила AnimeSSS Local.");
-                    if (args[3] == "-") {
-                        using (var hotkey = new ClientHotkey(client)) Application.Run(hotkey);
-                    }
-                }
+                StartClient(args[2], args[3]);
             }catch(Exception e){MessageBox.Show(e.Message,"Не удалось запустить копию AnimeSSS");}
             return;
         }
@@ -64,6 +70,27 @@ public partial class ExtensionManager : Form {
             Application.Run(new ExtensionManager(args));
         }
     }
+
+    static void StartClient(string exe, string profile) {
+        var start = new ProcessStartInfo(exe, "--via-launcher") {
+            WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = false,
+        };
+        start.EnvironmentVariables.Remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+        if (profile == "-") {
+            start.EnvironmentVariables.Remove("WEBVIEW2_USER_DATA_FOLDER");
+            start.EnvironmentVariables[ClientUpdate.ManagerPathVariable] = Application.ExecutablePath;
+        } else {
+            start.EnvironmentVariables["WEBVIEW2_USER_DATA_FOLDER"] = profile;
+            start.EnvironmentVariables.Remove(ClientUpdate.ManagerPathVariable);
+        }
+        using (var client = Process.Start(start)) {
+            if (client == null) throw new IOException("Windows не запустила AnimeSSS Local.");
+            if (profile == "-") {
+                using (var hotkey = new ClientHotkey(client)) Application.Run(hotkey);
+            }
+        }
+    }
+
     public ExtensionManager(string[] arguments) {
         args = arguments;
         BuildExtensionUI();
@@ -218,11 +245,18 @@ public partial class ExtensionManager : Form {
 
     async Task AttachInspector() {
         string folder = Path.Combine(root, "extensions", "dukhi-inspector");
-        if (!File.Exists(Path.Combine(folder, "manifest.json"))) return;
+        string manifest = Path.Combine(folder, "manifest.json");
+        if (!File.Exists(manifest)) return;
+        string receipt = Path.Combine(root, "dukhi-inspector-attached.txt");
+        string package = ExtensionPackages.Hash(File.ReadAllBytes(manifest));
         var registered = await web.CoreWebView2.Profile.GetBrowserExtensionsAsync();
-        if (registered.Any(extension => extension.Id == InspectorId)) return;
+        var existing = registered.FirstOrDefault(extension => extension.Id == InspectorId);
+        if (existing != null && File.Exists(receipt) && File.ReadAllText(receipt) == package) return;
+        bool enabled = existing == null || existing.IsEnabled;
         var inspector = await web.CoreWebView2.Profile.AddBrowserExtensionAsync(folder);
         if (inspector.Id != InspectorId) throw new IOException("Идентификатор инспектора не совпал.");
+        if (inspector.IsEnabled != enabled) await inspector.EnableAsync(enabled);
+        File.WriteAllText(receipt, package);
     }
 
     string TampermonkeyFolder() {

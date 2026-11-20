@@ -49,7 +49,9 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 
 [Files]
 Source: "dist\AnimeSSS.Local.next.exe"; DestDir: "{app}\dist"; DestName: "AnimeSSS.Local.exe"; Flags: ignoreversion
+Source: "dist\Dukhi.ClientUpdate.exe"; DestDir: "{app}\dist\app"; DestName: "animesss-launcher.exe"; Flags: ignoreversion
 Source: "inspector-extension\*"; DestDir: "{app}\dist\extensions\dukhi-inspector"; Flags: ignoreversion
+Source: "vendor\minisign\*"; DestDir: "{app}\dist\vendor\minisign"; Flags: ignoreversion
 #ifndef ManagerOnly
 Source: "dist\Microsoft.Web.WebView2.Core.dll"; DestDir: "{app}\dist"; Flags: ignoreversion
 Source: "dist\Microsoft.Web.WebView2.WinForms.dll"; DestDir: "{app}\dist"; Flags: ignoreversion
@@ -98,6 +100,7 @@ Type: files; Name: "{app}\dist\app\VERSION_HISTORY.txt"
 Type: files; Name: "{app}\dist\CLIENT_PATCH_REPORT.json"
 Type: files; Name: "{app}\dist\CLIENT_PATCH.lock"
 Type: files; Name: "{app}\dist\tampermonkey-attached.txt"
+Type: files; Name: "{app}\dist\dukhi-inspector-attached.txt"
 Type: files; Name: "{app}\dist\manager-install.ini"
 Type: dirifempty; Name: "{app}\dist\app"
 Type: dirifempty; Name: "{app}\dist"

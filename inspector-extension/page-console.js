@@ -16,13 +16,29 @@
       const message = Object.getOwnPropertyDescriptor(value, 'message')?.value;
       return typeof message === 'string' ? message.slice(0, 3200) : '[Ошибка]';
     }
-    return Array.isArray(value) ? '[Массив]' : '[Объект]';
+    return Array.isArray(value) ? 'Array(' + value.length + ')' : 'Object';
   }
 
-  function report(level, args) {
+  function snapshot(value) {
+    const keys = Object.keys(value);
+    const entries = keys.slice(0, 16).map(key => {
+      const field = Object.getOwnPropertyDescriptor(value, key);
+      const display = field && Object.hasOwn(field, 'value') ? preview(field.value).slice(0, 280) : '‹getter›';
+      return [key.slice(0, 100), display];
+    });
+    if (keys.length > 16) entries.push(['…', '+' + (keys.length - 16)]);
+    return { label: preview(value), entries };
+  }
+
+  function report(level, args, source = '') {
     try {
-      const text = args.slice(0, 12).map(preview).join(' ').slice(0, 4800);
-      emit(new Event(topic, { detail: stringify([level, text]) }));
+      const visible = args.slice(0, 12);
+      const text = visible.map(preview).join(' ').slice(0, 4800);
+      const objects = visible.filter(value => value && typeof value === 'object' && !Error.isError?.(value))
+        .slice(0, 2).map(value => {
+          try { return snapshot(value); } catch { return { label: 'Object', entries: [] }; }
+        }).filter(object => object.entries.length);
+      emit(new Event(topic, { detail: stringify([level, text, source, objects]) }));
     } catch {
       // Console output must still reach the browser if a value cannot be previewed.
     }
@@ -39,8 +55,8 @@
 
   window.addEventListener('error', event => {
     if (typeof event.message !== 'string' || !event.message) return;
-    const source = event.filename ? `\n${event.filename}:${event.lineno}:${event.colno}` : '';
-    report('error', [event.message + source]);
+    const source = event.filename ? event.filename + ':' + event.lineno + ':' + event.colno : '';
+    report('error', [event.message], source);
   });
   window.addEventListener('unhandledrejection', event => {
     report('error', ['Необработанное отклонение Promise:', event.reason]);

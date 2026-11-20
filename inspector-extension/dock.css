@@ -1,5 +1,5 @@
 html[data-dukhi-inspector-open] {
-  width: calc(100% - min(48vw, clamp(280px, 36vw, 560px))) !important;
+  width: calc(100% - var(--dukhi-inspector-width, 42vw)) !important;
   min-width: 0 !important;
 }
 
@@ -7,7 +7,7 @@ html[data-dukhi-inspector-open] {
   all: initial !important;
   position: fixed !important;
   inset: 0 0 0 auto !important;
-  width: min(48vw, clamp(280px, 36vw, 560px)) !important;
+  width: var(--dukhi-inspector-width, 42vw) !important;
   z-index: 2147483647 !important;
   display: block !important;
   color-scheme: dark !important;

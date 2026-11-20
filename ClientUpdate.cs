@@ -2,11 +2,17 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
 sealed class ClientUpdate {
     const string ClientName = "animesss-desktop.exe";
+    // Public key embedded in the official AnimeSSS updater.
+    const string UpdatePublicKey = "RWRAjQIgh9rjNPW377JtF+IMX7nd+eYQ9SRAuBgGyIEhTN8L2WlPd9oC";
+    internal const string ManagerPathVariable = "DUKHI_ANIMESSS_MANAGER_EXE";
+    const string ClientUpdateMutex = @"Local\AnimeSSS.DukhiDukhi.ClientUpdate";
     const string ReceiptName = "CLIENT_PATCH_REPORT.json";
     const string PatchName = "Update-PatchedClient.ps1";
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\AnimeSSS";
@@ -102,6 +108,171 @@ sealed class ClientUpdate {
 
     public void EnsureCurrent() {
         EnsureCurrent(OfficialPath());
+    }
+
+    public void ApplyInstalledUpdate(string planPath) {
+        bool first;
+        using (var updateLock = new Mutex(true, ClientUpdateMutex, out first)) {
+            if (!first) throw new IOException("Обновление AnimeSSS уже выполняется.");
+            string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "com.animesss.modktop");
+            ApplyLauncherPlan(planPath, OfficialPath(), profile);
+        }
+    }
+
+    internal void ApplyLauncherPlan(string planPath, string official, string profile) {
+        string helpers = Path.Combine(profile, "bootstrap", "helpers");
+        planPath = Path.GetFullPath(planPath);
+        string planFolder = Path.GetDirectoryName(planPath);
+        if (!SamePath(Path.GetDirectoryName(planFolder), helpers) || Path.GetFileName(planPath) != "plan.json")
+            throw new IOException("Не удалось подтвердить расположение плана обновления.");
+        CheckPlainPath(planPath);
+
+        var json = new JavaScriptSerializer { MaxJsonLength = 16384, RecursionLimit = 5 };
+        var plan = json.Deserialize<LauncherPlan>(ReadPlan(planPath));
+        Version version;
+        if (plan == null || !Version.TryParse(plan.version, out version) || version.Build < 0 ||
+            plan.version != version.ToString() ||
+            String.IsNullOrEmpty(plan.signature) || plan.repair || plan.parent <= 0 ||
+            !SamePath(plan.install_dir, Path.GetDirectoryName(LocalPath))) {
+            throw new IOException("AnimeSSS передал несовместимый план обновления.");
+        }
+        string cached = Path.Combine(profile, "updates", "AnimeSSS_" + plan.version + "_x64-setup.exe");
+        if (!SamePath(cached, plan.installer))
+            throw new IOException("Установщик обновления находится вне кэша AnimeSSS.");
+        CheckPlainPath(cached);
+        var current = VerifiedCopy();
+        Version localVersion;
+        if (current == null || !Version.TryParse(current.output_version, out localVersion) || version <= localVersion)
+            throw new IOException("План обновления не подходит установленной копии AnimeSSS.");
+        if (String.IsNullOrEmpty(official))
+            throw new IOException("Для установки обновления нужен официальный AnimeSSS.");
+        string officialFolder = Path.GetDirectoryName(official);
+        if (SamePath(officialFolder, Path.GetDirectoryName(LocalPath)))
+            throw new IOException("Официальный AnimeSSS должен находиться в отдельной папке.");
+        WaitForUpdatedClient(plan.parent);
+
+        if (!VersionAtLeast(official, version))
+            InstallVerifiedUpdate(planFolder, cached, plan, officialFolder);
+        if (!VersionAtLeast(official, version))
+            throw new IOException("Установщик не подтвердил установку AnimeSSS " + version + ".");
+        EnsureCurrent(official);
+    }
+
+    sealed class LauncherPlan {
+        public string version { get; set; }
+        public string signature { get; set; }
+        public string install_dir { get; set; }
+        public string installer { get; set; }
+        public bool repair { get; set; }
+        public int parent { get; set; }
+    }
+
+    static bool SamePath(string first, string second) {
+        return !String.IsNullOrEmpty(first) && !String.IsNullOrEmpty(second) &&
+            String.Equals(Path.GetFullPath(first).TrimEnd('\\', '/'), Path.GetFullPath(second).TrimEnd('\\', '/'),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    static void CheckPlainPath(string path) {
+        for (string item = path; item != null; item = Path.GetDirectoryName(item)) {
+            if ((File.GetAttributes(item) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Путь обновления AnimeSSS перенаправлен.");
+        }
+    }
+
+    static string ReadPlan(string path) {
+        using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+            if (file.Length == 0 || file.Length > 16384)
+                throw new IOException("Размер плана обновления AnimeSSS некорректен.");
+            using (var reader = new StreamReader(file, new UTF8Encoding(false, true))) return reader.ReadToEnd();
+        }
+    }
+
+    static bool VersionAtLeast(string path, Version version) {
+        Version actual;
+        return Version.TryParse(VersionOf(path), out actual) && actual >= version;
+    }
+
+    void WaitForUpdatedClient(int pid) {
+        Process client;
+        try { client = Process.GetProcessById(pid); }
+        catch (ArgumentException) { return; }
+        using (client) {
+            if (client.HasExited) return;
+            if (!SamePath(client.MainModule.FileName, LocalPath))
+                throw new IOException("План обновления относится к другому процессу.");
+            if (!client.WaitForExit(30000))
+                throw new IOException("AnimeSSS не завершился для установки обновления.");
+        }
+    }
+
+    void InstallVerifiedUpdate(string planFolder, string installer, LauncherPlan plan, string officialFolder) {
+        string working = Path.Combine(planFolder, "dukhi-install-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(working);
+        string stagedSetup = Path.Combine(working, Path.GetFileName(installer));
+        string stagedSignature = stagedSetup + ".minisig";
+        try {
+            File.Copy(installer, stagedSetup);
+            byte[] signature;
+            try { signature = Convert.FromBase64String(plan.signature); }
+            catch (FormatException error) { throw new IOException("Подпись обновления AnimeSSS повреждена.", error); }
+            File.WriteAllBytes(stagedSignature, signature);
+            // Keep the verified bytes locked against replacements through setup.
+            using (File.Open(stagedSetup, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (File.Open(stagedSignature, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                VerifyInstaller(stagedSetup, stagedSignature, signature, plan.version);
+                InstallWithoutRestart(stagedSetup, officialFolder);
+            }
+        } finally {
+            try {
+                File.Delete(stagedSignature);
+                File.Delete(stagedSetup);
+                Directory.Delete(working);
+            } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    void VerifyInstaller(string setup, string signaturePath, byte[] signature, string version) {
+        string verifier = Path.Combine(root, "vendor", "minisign", "minisign.exe");
+        if (!File.Exists(verifier)) throw new FileNotFoundException("В комплекте менеджера отсутствует проверка подписи AnimeSSS.");
+        var start = new ProcessStartInfo(verifier,
+            "-V -Q -H -P " + UpdatePublicKey + " -m \"" + setup + "\" -x \"" + signaturePath + "\"") {
+                WorkingDirectory = Path.GetDirectoryName(verifier), UseShellExecute = false, CreateNoWindow = true,
+            };
+        using (var process = Process.Start(start)) {
+            if (process == null) throw new IOException("Не удалось запустить проверку подписи AnimeSSS.");
+            if (!process.WaitForExit(30000)) {
+                try { process.Kill(); } catch (InvalidOperationException) { }
+                throw new IOException("Проверка подписи AnimeSSS не завершилась.");
+            }
+            if (process.ExitCode != 0) throw new IOException("Подпись установщика AnimeSSS не прошла проверку.");
+        }
+        // Minisign verifies the trusted comment as well as the installer itself.
+        const string prefix = "trusted comment: ";
+        var lines = new UTF8Encoding(false, true).GetString(signature).Replace("\r\n", "\n").Split('\n');
+        if (lines.Length < 4 || !lines[2].StartsWith(prefix, StringComparison.Ordinal))
+            throw new IOException("В подписи AnimeSSS отсутствуют сведения о пакете.");
+        var fields = lines[2].Substring(prefix.Length).Split('\t');
+        if (Array.IndexOf(fields, "version:" + version) < 0 ||
+            Array.IndexOf(fields, "file:" + Path.GetFileName(setup)) < 0)
+            throw new IOException("Подписанные имя и версия пакета AnimeSSS не совпадают с обновлением.");
+    }
+
+    static void InstallWithoutRestart(string setup, string officialFolder) {
+        // NSIS consumes /D as the final argument, without quoting even when the path has spaces.
+        // Omitting /R keeps the stock app closed. The manager launches the patched app after verification.
+        var start = new ProcessStartInfo(setup, "/S /UPDATE /D=" + officialFolder) {
+            WorkingDirectory = officialFolder, UseShellExecute = false, CreateNoWindow = true,
+        };
+        start.EnvironmentVariables.Remove("WEBVIEW2_USER_DATA_FOLDER");
+        start.EnvironmentVariables.Remove("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+        start.EnvironmentVariables.Remove(ManagerPathVariable);
+        using (var process = Process.Start(start)) {
+            if (process == null) throw new IOException("Windows не запустила установщик AnimeSSS.");
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new IOException("Установщик AnimeSSS завершился с кодом " + process.ExitCode + ".");
+        }
     }
 
     internal void EnsureCurrent(string source) {
