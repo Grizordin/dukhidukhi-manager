@@ -105,15 +105,21 @@ function Get-Sha256Hex([byte[]]$Data) {
     finally { $algorithm.Dispose() }
 }
 
-function Get-PlainClientEntries([string]$Directory) {
+function Get-PlainClientEntries([string]$Directory, [string]$ManagerDirectory) {
     $folder = Get-Item -LiteralPath $Directory -Force
     if (-not $folder.PSIsContainer -or ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Invalid client folder: $Directory"
     }
+    $sharesManagerHome = $ManagerDirectory -and $folder.FullName -ieq (Split-Path -Parent $ManagerDirectory)
+    $managerInstallFiles = @('Update-PatchedClient.ps1', 'Update-PatchedClient.cmd', 'UPDATE_CLIENT_RU.md',
+        'EXTENSIONS_RU.md', 'DukhiDukhi-Manager-Setup.exe')
     foreach ($item in (Get-ChildItem -LiteralPath $folder.FullName -Force)) {
+        if ($item.FullName -ieq $ManagerDirectory) { continue }
+        if ($sharesManagerHome -and -not $item.PSIsContainer -and
+            ($managerInstallFiles -icontains $item.Name -or $item.Name -imatch '^unins[0-9]{3}\.(exe|dat|msg)$')) { continue }
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Redirected client asset: $($item.FullName)" }
         $item
-        if ($item.PSIsContainer) { Get-PlainClientEntries $item.FullName }
+        if ($item.PSIsContainer) { Get-PlainClientEntries $item.FullName $ManagerDirectory }
     }
 }
 
@@ -253,7 +259,6 @@ $destinationDirectory = Join-Path $DistPath 'app'
 $destination = Join-Path $destinationDirectory 'animesss-desktop.exe'
 $reportPath = Join-Path $DistPath 'CLIENT_PATCH_REPORT.json'
 if ($DistPath -ieq $sourceDirectory -or
-    $DistPath.StartsWith($sourceDirectory.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
     $sourceDirectory -ieq $destinationDirectory -or
     $sourceDirectory.StartsWith($destinationDirectory + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The official client and manager client directories must be separate.'
@@ -339,7 +344,7 @@ if ($PSCmdlet.ShouldProcess($destination, "Build AnimeSSS $version with Tampermo
         $newMoved = $false
         try {
             New-Item -ItemType Directory -Path $stage | Out-Null
-            foreach ($entry in (Get-PlainClientEntries $sourceDirectory)) {
+            foreach ($entry in (Get-PlainClientEntries $sourceDirectory $DistPath)) {
                 $relative = $entry.FullName.Substring($sourceDirectory.Length + 1)
                 if ($reserved -icontains $relative) { continue }
                 $target = Join-Path $stage $relative

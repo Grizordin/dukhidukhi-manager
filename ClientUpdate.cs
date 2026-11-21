@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Collections.Generic;
@@ -19,6 +20,9 @@ sealed class ClientUpdate {
     const string PatchName = "Update-PatchedClient.ps1";
     static readonly HashSet<string> ManagerFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
         ClientName, "animesss-launcher.exe", "uninstall.exe",
+    };
+    static readonly HashSet<string> ManagerInstallFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+        PatchName, "Update-PatchedClient.cmd", "UPDATE_CLIENT_RU.md", "EXTENSIONS_RU.md", "DukhiDukhi-Manager-Setup.exe",
     };
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\AnimeSSS";
     readonly string root;
@@ -104,16 +108,20 @@ sealed class ClientUpdate {
         var assets = new Dictionary<string, string>(receipt.client_assets, StringComparer.OrdinalIgnoreCase);
         var official = new DirectoryInfo(Path.GetDirectoryName(source));
         var installed = new DirectoryInfo(Path.GetDirectoryName(LocalPath));
-        try { return MatchAssets(official, installed, "", assets) && assets.Count == 0; }
+        try { return MatchAssets(official, installed, new DirectoryInfo(root), "", assets) && assets.Count == 0; }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
 
-    static bool MatchAssets(DirectoryInfo expected, DirectoryInfo installed, string prefix, Dictionary<string, string> assets) {
+    static bool MatchAssets(DirectoryInfo expected, DirectoryInfo installed, DirectoryInfo manager,
+                            string prefix, Dictionary<string, string> assets) {
         if (!installed.Exists ||
             ((expected.Attributes | installed.Attributes) & FileAttributes.ReparsePoint) != 0) return false;
+        bool sharesManagerHome = manager.Parent != null && SamePath(expected.FullName, manager.Parent.FullName);
         foreach (var file in expected.EnumerateFiles()) {
             if (prefix.Length == 0 && ManagerFiles.Contains(file.Name)) continue;
+            if (sharesManagerHome && (ManagerInstallFiles.Contains(file.Name) ||
+                Regex.IsMatch(file.Name, @"^unins[0-9]{3}\.(exe|dat|msg)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))) continue;
             string path = prefix + file.Name;
             string hash;
             if (!assets.TryGetValue(path, out hash)) return false;
@@ -124,7 +132,8 @@ sealed class ClientUpdate {
             assets.Remove(path);
         }
         foreach (var folder in expected.EnumerateDirectories()) {
-            if (!MatchAssets(folder, new DirectoryInfo(Path.Combine(installed.FullName, folder.Name)),
+            if (SamePath(folder.FullName, manager.FullName)) continue;
+            if (!MatchAssets(folder, new DirectoryInfo(Path.Combine(installed.FullName, folder.Name)), manager,
                     prefix + folder.Name + "\\", assets)) return false;
         }
         return true;
