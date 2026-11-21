@@ -18,6 +18,8 @@ GitHub Releases содержит пакеты для обновления уже
 
 Обновление запускается из окна самого AnimeSSS. Менеджер проверяет подпись официального пакета, устанавливает его в папку штатного клиента в тихом режиме, переносит патч и запускает копию с Tampermonkey. Для проверки подписи в пакет включён [Minisign 0.12 для Windows x64](https://github.com/jedisct1/minisign/releases/tag/0.12) с лицензией в `vendor/minisign`.
 
+Менеджер переносит ресурсы из официальной папки AnimeSSS, включая движок озвучки лабиринта и DLL. Если ресурсы изменились при той же версии EXE, менеджер обновит их при следующем запуске клиента из менеджера.
+
 ## Сборка пакета для GitHub
 
 В `dist` нужны `Microsoft.Web.WebView2.Core.dll` и `Microsoft.Web.WebView2.WinForms.dll` из SDK Microsoft WebView2. Пакет использует .NET Framework 4.x и Inno Setup 6.

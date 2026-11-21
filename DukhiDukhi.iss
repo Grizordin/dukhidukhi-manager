@@ -52,6 +52,7 @@ Source: "dist\AnimeSSS.Local.next.exe"; DestDir: "{app}\dist"; DestName: "AnimeS
 Source: "dist\Dukhi.ClientUpdate.exe"; DestDir: "{app}\dist\app"; DestName: "animesss-launcher.exe"; Flags: ignoreversion
 Source: "inspector-extension\*"; DestDir: "{app}\dist\extensions\dukhi-inspector"; Flags: ignoreversion
 Source: "vendor\minisign\*"; DestDir: "{app}\dist\vendor\minisign"; Flags: ignoreversion
+Source: "Update-PatchedClient.ps1"; DestDir: "{app}"; Flags: ignoreversion
 #ifndef ManagerOnly
 Source: "dist\Microsoft.Web.WebView2.Core.dll"; DestDir: "{app}\dist"; Flags: ignoreversion
 Source: "dist\Microsoft.Web.WebView2.WinForms.dll"; DestDir: "{app}\dist"; Flags: ignoreversion
@@ -61,7 +62,6 @@ Source: "dist\extensions\tampermonkey-legacy-quick-controls\*"; DestDir: "{app}\
 Source: "dist\Dukhi.Reminders.exe"; DestDir: "{app}\dist"; Flags: ignoreversion
 Source: "clicker-native-host.json"; DestDir: "{app}\dist"; Flags: ignoreversion
 Source: "dist\blocker-filters\*"; DestDir: "{app}\dist\blocker-filters"; Flags: ignoreversion
-Source: "Update-PatchedClient.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Update-PatchedClient.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "EXTENSIONS_RU.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UPDATE_CLIENT_RU.md"; DestDir: "{app}"; Flags: ignoreversion

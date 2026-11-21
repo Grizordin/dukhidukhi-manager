@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
+using System.Collections.Generic;
+using System.Security.Cryptography;
 using Microsoft.Win32;
 
 sealed class ClientUpdate {
@@ -15,6 +17,9 @@ sealed class ClientUpdate {
     const string ClientUpdateMutex = @"Local\AnimeSSS.DukhiDukhi.ClientUpdate";
     const string ReceiptName = "CLIENT_PATCH_REPORT.json";
     const string PatchName = "Update-PatchedClient.ps1";
+    static readonly HashSet<string> ManagerFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+        ClientName, "animesss-launcher.exe", "uninstall.exe",
+    };
     const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\AnimeSSS";
     readonly string root;
 
@@ -29,6 +34,7 @@ sealed class ClientUpdate {
         public string source_sha256 { get; set; }
         public string output_sha256 { get; set; }
         public string output_version { get; set; }
+        public Dictionary<string, string> client_assets { get; set; }
     }
 
     public sealed class State {
@@ -89,8 +95,44 @@ sealed class ClientUpdate {
         return new State {
             OfficialVersion = VersionOf(source),
             LocalVersion = local == null ? null : local.output_version,
-            UpToDate = local != null && SameHash(sourceHash, local.source_sha256),
+            UpToDate = local != null && SameHash(sourceHash, local.source_sha256) && AssetsCurrent(source, local),
         };
+    }
+
+    bool AssetsCurrent(string source, Receipt receipt) {
+        if (receipt.client_assets == null) return false;
+        var assets = new Dictionary<string, string>(receipt.client_assets, StringComparer.OrdinalIgnoreCase);
+        var official = new DirectoryInfo(Path.GetDirectoryName(source));
+        var installed = new DirectoryInfo(Path.GetDirectoryName(LocalPath));
+        try { return MatchAssets(official, installed, "", assets) && assets.Count == 0; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    static bool MatchAssets(DirectoryInfo expected, DirectoryInfo installed, string prefix, Dictionary<string, string> assets) {
+        if (!installed.Exists ||
+            ((expected.Attributes | installed.Attributes) & FileAttributes.ReparsePoint) != 0) return false;
+        foreach (var file in expected.EnumerateFiles()) {
+            if (prefix.Length == 0 && ManagerFiles.Contains(file.Name)) continue;
+            string path = prefix + file.Name;
+            string hash;
+            if (!assets.TryGetValue(path, out hash)) return false;
+            var actual = new FileInfo(Path.Combine(installed.FullName, file.Name));
+            if (!actual.Exists || actual.Length != file.Length ||
+                ((file.Attributes | actual.Attributes) & FileAttributes.ReparsePoint) != 0 ||
+                !SameHash(hash, AssetHash(file.FullName)) || !SameHash(hash, AssetHash(actual.FullName))) return false;
+            assets.Remove(path);
+        }
+        foreach (var folder in expected.EnumerateDirectories()) {
+            if (!MatchAssets(folder, new DirectoryInfo(Path.Combine(installed.FullName, folder.Name)),
+                    prefix + folder.Name + "\\", assets)) return false;
+        }
+        return true;
+    }
+
+    static string AssetHash(string path) {
+        using (var file = File.OpenRead(path))
+        using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(file)).Replace("-", "");
     }
 
     public State Inspect() {
@@ -282,13 +324,13 @@ sealed class ClientUpdate {
             throw new IOException("Установите официальный AnimeSSS, затем снова нажмите «Открыть AnimeSSS».");
         }
         string hash = ExtensionPackages.Hash(File.ReadAllBytes(source));
-        if (local != null && SameHash(hash, local.source_sha256)) return;
+        if (local != null && SameHash(hash, local.source_sha256) && AssetsCurrent(source, local)) return;
         string patch = Path.Combine(root, PatchName);
         if (!File.Exists(patch)) patch = Path.GetFullPath(Path.Combine(root, "..", PatchName));
         if (!File.Exists(patch)) throw new FileNotFoundException("Патчер AnimeSSS отсутствует в комплекте менеджера.");
         RunPatch(patch, source, hash);
         local = VerifiedCopy();
-        if (local == null || !SameHash(hash, local.source_sha256))
+        if (local == null || !SameHash(hash, local.source_sha256) || !AssetsCurrent(source, local))
             throw new IOException("Проверка локальной копии после патча не прошла.");
     }
 
